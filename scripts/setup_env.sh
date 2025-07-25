@@ -1,3 +1,3 @@
 #!/bin/bash
-# Setup environment for Reflexionary
+# Setup environment for reflexionary
 pip install -r requirements.txt

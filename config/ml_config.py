@@ -1,0 +1,4 @@
+# ML model config for Reflexionary
+ML_MODEL_PATHS = {}
+TRAINING_PARAMETERS = {}
+ANOMALY_DETECTION_THRESHOLDS = {}
