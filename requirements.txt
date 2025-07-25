@@ -1,0 +1,14 @@
+# Primary dependencies for Reflexionary core application
+streamlit
+firebase-admin
+sentence-transformers
+annoy
+pydantic
+PyPortfolioOpt
+pandas
+numpy
+scipy
+statsmodels
+bt
+requests
+scikit-learn
