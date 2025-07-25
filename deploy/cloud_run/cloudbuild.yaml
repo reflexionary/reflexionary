@@ -1,0 +1,8 @@
+# Cloud Build config for Reflexionary
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/reflexionary', '.']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/reflexionary']
+images:
+  - 'gcr.io/$PROJECT_ID/reflexionary'

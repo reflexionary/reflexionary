@@ -1,0 +1,20 @@
+# Kubernetes manifests for Reflexionary deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reflexionary
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: reflexionary
+  template:
+    metadata:
+      labels:
+        app: reflexionary
+    spec:
+      containers:
+      - name: reflexionary
+        image: reflexionary:latest
+        ports:
+        - containerPort: 8501
