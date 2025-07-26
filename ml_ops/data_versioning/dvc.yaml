@@ -5,9 +5,26 @@ stages:
     cmd: python prepare_data.py
     outs:
       - ../../data/processed_data.csv
-  train:
+  train_anomaly:
     cmd: python ../model_training/train_anomaly_detector.py
     deps:
       - ../../data/processed_data.csv
     outs:
       - ../../models/anomaly_detector.pkl
+  train_memory_models:
+    cmd: python ../model_training/train_memory_models.py
+    deps:
+      - ../../data/processed_data.csv
+    outs:
+      - ../../models/embedding_stats.json
+      - ../../models/memory_training_summary.json
+  train_quant_models:
+    cmd: python ../model_training/train_quant_models.py
+    deps:
+      - ../../data/processed_data.csv
+    outs:
+      - ../../models/quant_training_summary.json
+      - ../../models/timeseries_*.pkl
+      - ../../models/portfolio_opt_*.json
+      - ../../models/risk_anomaly_*.pkl
+      - ../../models/factor_exposure_*.json
