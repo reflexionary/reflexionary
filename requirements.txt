@@ -1,14 +1,16 @@
-# Primary dependencies for Reflexionary core application
-streamlit
-firebase-admin
-sentence-transformers
-annoy
-pydantic
-PyPortfolioOpt
-pandas
-numpy
-scipy
-statsmodels
-bt
-requests
-scikit-learn
+# Core Dependencies
+google-generativeai  # For Gemini AI integration
+sentence-transformers  # For text embeddings
+annoy  # For approximate nearest neighbor search
+firebase-admin  # For Firebase integration
+pandas  # Data manipulation
+numpy  # Numerical operations
+scipy  # Scientific computing
+PyPortfolioOpt  # Portfolio optimization
+statsmodels  # Statistical modeling
+requests  # HTTP requests
+python-dotenv  # Environment variable management
+streamlit  # Web UI
+scikit-learn  # Machine learning utilities
+bt  # Backtesting library
+pydantic  # Data validation
