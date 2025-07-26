@@ -1,5 +1,159 @@
-# Model serving endpoint configuration for Reflexionary
+# Model serving endpoint configuration for Tethys Financial Co-Pilot
 
+# Memory Layer Endpoints
+memory_layer:
+  ingest_memory:
+    path: /memory/ingest
+    method: POST
+    input_schema:
+      user_id: string
+      text: string
+      memory_type: string
+      metadata: object (optional)
+    output_schema:
+      status: string
+      message: string
+      memory_type: string
+      timestamp: string
+  
+  query_memories:
+    path: /memory/query
+    method: POST
+    input_schema:
+      user_id: string
+      query: string
+      num_results: integer (1-10)
+    output_schema:
+      status: string
+      user_id: string
+      query: string
+      memories: array
+      count: integer
+      timestamp: string
+  
+  get_embedding:
+    path: /memory/embedding
+    method: POST
+    input_schema:
+      text: string
+    output_schema:
+      status: string
+      text: string
+      embedding_dim: integer
+      embedding: array
+      timestamp: string
+
+# Mathematical Intelligence Endpoints
+mathematical_intelligence:
+  portfolio_performance:
+    path: /quant/portfolio/performance
+    method: POST
+    input_schema:
+      user_id: string
+      risk_tolerance: string (low/medium/high)
+      investment_amount: float (optional)
+    output_schema:
+      status: string
+      user_id: string
+      metrics: object
+      timestamp: string
+  
+  portfolio_optimization:
+    path: /quant/portfolio/optimize
+    method: POST
+    input_schema:
+      user_id: string
+      risk_tolerance: string (low/medium/high)
+      investment_amount: float (optional)
+    output_schema:
+      status: string
+      user_id: string
+      optimization: object
+      timestamp: string
+  
+  value_at_risk:
+    path: /quant/risk/var
+    method: POST
+    input_schema:
+      user_id: string
+      confidence_level: float (0.8-0.99)
+      time_horizon_days: integer (1-30)
+    output_schema:
+      status: string
+      user_id: string
+      var_result: object
+      timestamp: string
+  
+  time_series_forecast:
+    path: /quant/forecast/timeseries
+    method: POST
+    input_schema:
+      ticker: string
+      lookback: integer (10-100)
+      horizon: integer (1-30)
+      model_type: string (tft/nbeats/lstm)
+    output_schema:
+      status: string
+      ticker: string
+      model_type: string
+      forecast: object
+      timestamp: string
+
+# Integrated Endpoints (Memory + Mathematical Intelligence)
+integrated_services:
+  integrated_query:
+    path: /integrated/query
+    method: POST
+    input_schema:
+      user_id: string
+      query: string
+      include_memory: boolean
+      include_quant: boolean
+      num_memory_results: integer (1-10)
+    output_schema:
+      status: string
+      result: object
+      memory_context: object (optional)
+      quantitative_insights: object (optional)
+      integrated_response: object
+  
+  financial_advice:
+    path: /integrated/financial_advice
+    method: POST
+    input_schema:
+      user_id: string
+      query: string
+      include_memory: boolean
+      include_quant: boolean
+      num_memory_results: integer (1-10)
+    output_schema:
+      status: string
+      advice: object
+      user_context: object
+      personalized_advice: object
+      timestamp: string
+
+# Utility Endpoints
+utility:
+  health_check:
+    path: /health
+    method: GET
+    output_schema:
+      status: string
+      service: string
+      version: string
+      timestamp: string
+  
+  model_status:
+    path: /models/status
+    method: GET
+    output_schema:
+      status: string
+      models: object
+      total_models: integer
+      timestamp: string
+
+# Legacy Endpoint (for backward compatibility)
 anomaly_detector:
   path: /predict
   method: POST
@@ -7,4 +161,4 @@ anomaly_detector:
     feature1: float
     feature2: float
   output_schema:
-    anomaly: bool
+    anomaly: boolean
