@@ -14,3 +14,7 @@ streamlit  # Web UI
 scikit-learn  # Machine learning utilities
 bt  # Backtesting library
 pydantic  # Data validation
+
+# API Server Dependencies
+fastapi  # FastAPI framework
+uvicorn  # ASGI server for FastAPI

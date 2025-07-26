@@ -1,5 +1,5 @@
 """
-Tacit - Persistent Storage Service
+Tethys - Persistent Storage Service
 
 This module provides a high-level interface for persisting and retrieving user memories
 in Firebase Firestore. It handles all read/write operations to the cloud database,
@@ -10,21 +10,24 @@ Key Features:
 - Batch operations for efficient data management
 - Comprehensive error handling and logging
 - Automatic retry for transient failures
+- Fallback to in-memory storage when Firebase is not configured
 """
 
 import os
 import logging
 from typing import Dict, Any, Optional, List
-import json  # For potential debugging output
+import json
+from datetime import datetime
 
 # Import Firebase Admin SDK components
 try:
     import firebase_admin
     from firebase_admin import credentials, firestore
     from firebase_admin import exceptions as firebase_exceptions
+    FIREBASE_AVAILABLE = True
 except ImportError:
-    logger.critical("Firebase Admin SDK not found. Please install it: pip install firebase-admin")
-    exit(1)
+    FIREBASE_AVAILABLE = False
+    logging.warning("Firebase Admin SDK not found. Using in-memory storage fallback.")
 
 # Import application-wide settings for Firebase configuration
 from config.app_settings import FIREBASE_SERVICE_ACCOUNT_KEY_PATH
@@ -37,39 +40,46 @@ if not logger.handlers:
 # --- Global Firebase Initialization ---
 # This block ensures Firebase Admin SDK is initialized once when this module is loaded.
 # It uses the service account key you downloaded from the Firebase Console.
-_db: firestore.Client = None  # Global Firestore client instance
+_db: Optional[firestore.Client] = None  # Global Firestore client instance
+_use_mock_storage = False  # Flag to use in-memory storage
+
+# In-memory storage fallback
+_mock_storage: Dict[str, Dict[str, Any]] = {}
 
 def _initialize_firebase_app():
     """Initializes the Firebase Admin SDK if it hasn't been initialized yet."""
-    global _db
-    if not firebase_admin._apps:
-        try:
-            # Check if the service account key path is set
-            if not FIREBASE_SERVICE_ACCOUNT_KEY_PATH:
-                logger.critical("Persistent Storage: FIREBASE_SERVICE_ACCOUNT_KEY_PATH is not set in config/settings.py or .env.")
-                logger.critical("Cannot initialize Firebase Admin SDK. Please set the path to your downloaded service account JSON file.")
-                exit(1)
-            
-            if not os.path.exists(FIREBASE_SERVICE_ACCOUNT_KEY_PATH):
-                logger.critical(f"Persistent Storage: Firebase service account key file not found at '{FIREBASE_SERVICE_ACCOUNT_KEY_PATH}'.")
-                logger.critical("Please ensure the path is correct and the file exists.")
-                exit(1)
+    global _db, _use_mock_storage
+    
+    # Check if Firebase is available and configured
+    if not FIREBASE_AVAILABLE:
+        logger.warning("Firebase Admin SDK not available. Using in-memory storage.")
+        _use_mock_storage = True
+        return
+    
+    if not FIREBASE_SERVICE_ACCOUNT_KEY_PATH:
+        logger.warning("FIREBASE_SERVICE_ACCOUNT_KEY_PATH is not set. Using in-memory storage fallback.")
+        _use_mock_storage = True
+        return
+    
+    if not os.path.exists(FIREBASE_SERVICE_ACCOUNT_KEY_PATH):
+        logger.warning(f"Firebase service account key file not found at '{FIREBASE_SERVICE_ACCOUNT_KEY_PATH}'. Using in-memory storage fallback.")
+        _use_mock_storage = True
+        return
 
+    try:
+        if not firebase_admin._apps:
             # Use credentials.Certificate for local file path
             cred = credentials.Certificate(FIREBASE_SERVICE_ACCOUNT_KEY_PATH)
             firebase_admin.initialize_app(cred)
             logger.info("Persistent Storage: Firebase Admin SDK initialized successfully.")
-            _db = firestore.client()
-            logger.info("Persistent Storage: Firestore client obtained.")
-        except Exception as e:
-            logger.critical(f"Persistent Storage: CRITICAL ERROR initializing Firebase or Firestore: {e}")
-            logger.critical("Please ensure the Firebase project is set up, Firestore is enabled, and the service account key is valid.")
-            exit(1)
-    else:
-        # If already initialized (e.g., by another module), just get the client
-        if _db is None:
-            _db = firestore.client()
-        logger.info("Persistent Storage: Firebase Admin SDK already initialized.")
+        
+        _db = firestore.client()
+        logger.info("Persistent Storage: Firestore client obtained.")
+        _use_mock_storage = False
+        
+    except Exception as e:
+        logger.warning(f"Failed to initialize Firebase: {e}. Using in-memory storage fallback.")
+        _use_mock_storage = True
 
 # Initialize Firebase when the module is imported
 _initialize_firebase_app()
@@ -89,6 +99,23 @@ def store_raw_memory(user_id: str, memory_id: str, text: str, memory_type: str, 
         timestamp (str): ISO 8601 formatted string of when the memory was created.
         metadata (dict, optional): Additional key-value pairs to store with the memory. Defaults to None.
     """
+    if _use_mock_storage:
+        # Use in-memory storage
+        user_key = f"user_{user_id}"
+        if user_key not in _mock_storage:
+            _mock_storage[user_key] = {}
+        
+        _mock_storage[user_key][memory_id] = {
+            'text': text,
+            'memory_type': memory_type,
+            'timestamp': timestamp,
+            'metadata': metadata or {},
+            'user_id': user_id,
+            'memory_id': memory_id
+        }
+        logger.info(f"Mock Storage: Stored memory {memory_id} for user {user_id}")
+        return
+
     if _db is None:
         logger.error("Persistent Storage: Firestore client not initialized. Cannot store memory.")
         return
@@ -98,115 +125,195 @@ def store_raw_memory(user_id: str, memory_id: str, text: str, memory_type: str, 
         doc_ref = _db.collection(f'users/{user_id}/memories').document(memory_id)
 
         # Construct the data to be stored
-        data_to_store = {
+        memory_data = {
             'text': text,
-            'type': memory_type,
+            'memory_type': memory_type,
             'timestamp': timestamp,
-            'user_id': user_id,  # Redundant but useful for queries/indexing in Firestore
-            'doc_id': memory_id  # Store the document ID within the document itself
+            'metadata': metadata or {},
+            'user_id': user_id,
+            'memory_id': memory_id
         }
-        if metadata:
-            data_to_store.update(metadata)  # Merge additional metadata
 
-        # Set the document data. This will create or overwrite the document.
-        doc_ref.set(data_to_store)
-        logger.info(f"Persistent Storage: Stored memory '{memory_id[:8]}...' for user '{user_id}' (Type: {memory_type}).")
+        # Store the memory in Firestore
+        doc_ref.set(memory_data)
+        logger.info(f"Persistent Storage: Successfully stored memory {memory_id} for user {user_id}")
+
     except firebase_exceptions.FirebaseError as e:
-        logger.error(f"Persistent Storage: Firebase error storing memory '{memory_id}' for user '{user_id}': {e}")
+        logger.error(f"Persistent Storage: Firebase error storing memory {memory_id} for user {user_id}: {e}")
+        raise
     except Exception as e:
-        logger.error(f"Persistent Storage: An unexpected error occurred during store_raw_memory: {e}")
-
+        logger.error(f"Persistent Storage: Unexpected error storing memory {memory_id} for user {user_id}: {e}")
+        raise
 
 def retrieve_raw_memory(user_id: str, memory_id: str) -> Optional[Dict[str, Any]]:
     """
-    Retrieves a raw memory document from Firebase Firestore by its ID for a specific user.
+    Retrieves a specific raw memory from Firebase Firestore.
 
     Args:
         user_id (str): The unique identifier for the user.
-        memory_id (str): The unique identifier for the memory document.
+        memory_id (str): The unique identifier for the specific memory.
 
     Returns:
-        dict | None: A dictionary containing the memory data if found, otherwise None.
+        dict or None: The memory data if found, None otherwise.
     """
+    if _use_mock_storage:
+        # Use in-memory storage
+        user_key = f"user_{user_id}"
+        if user_key in _mock_storage and memory_id in _mock_storage[user_key]:
+            return _mock_storage[user_key][memory_id]
+        return None
+
     if _db is None:
         logger.error("Persistent Storage: Firestore client not initialized. Cannot retrieve memory.")
         return None
 
     try:
+        # Reference to the specific document
         doc_ref = _db.collection(f'users/{user_id}/memories').document(memory_id)
-        doc = doc_ref.get()  # Attempt to get the document
-
+        
+        # Get the document
+        doc = doc_ref.get()
+        
         if doc.exists:
-            logger.info(f"Persistent Storage: Retrieved memory '{memory_id[:8]}...' for user '{user_id}'.")
-            return doc.to_dict()  # Return the document data as a dictionary
+            memory_data = doc.to_dict()
+            logger.info(f"Persistent Storage: Successfully retrieved memory {memory_id} for user {user_id}")
+            return memory_data
         else:
-            logger.info(f"Persistent Storage: Memory '{memory_id[:8]}...' not found for user '{user_id}'.")
-            return None  # Document does not exist
+            logger.info(f"Persistent Storage: Memory {memory_id} not found for user {user_id}")
+            return None
+
     except firebase_exceptions.FirebaseError as e:
-        logger.error(f"Persistent Storage: Firebase error retrieving memory '{memory_id}' for user '{user_id}': {e}")
+        logger.error(f"Persistent Storage: Firebase error retrieving memory {memory_id} for user {user_id}: {e}")
         return None
     except Exception as e:
-        logger.error(f"Persistent Storage: An unexpected error occurred during retrieve_raw_memory: {e}")
+        logger.error(f"Persistent Storage: Unexpected error retrieving memory {memory_id} for user {user_id}: {e}")
         return None
 
 def delete_raw_memory(user_id: str, memory_id: str):
     """
-    Deletes a specific memory document from Firebase Firestore for a user.
+    Deletes a specific raw memory from Firebase Firestore.
 
     Args:
         user_id (str): The unique identifier for the user.
-        memory_id (str): The ID of the memory document to delete.
+        memory_id (str): The unique identifier for the specific memory.
     """
+    if _use_mock_storage:
+        # Use in-memory storage
+        user_key = f"user_{user_id}"
+        if user_key in _mock_storage and memory_id in _mock_storage[user_key]:
+            del _mock_storage[user_key][memory_id]
+            logger.info(f"Mock Storage: Deleted memory {memory_id} for user {user_id}")
+        return
+
     if _db is None:
         logger.error("Persistent Storage: Firestore client not initialized. Cannot delete memory.")
         return
 
     try:
-        _db.collection(f'users/{user_id}/memories').document(memory_id).delete()
-        logger.info(f"Persistent Storage: Deleted memory '{memory_id[:8]}...' from Firestore for user '{user_id}'.")
+        # Reference to the specific document
+        doc_ref = _db.collection(f'users/{user_id}/memories').document(memory_id)
+        
+        # Delete the document
+        doc_ref.delete()
+        logger.info(f"Persistent Storage: Successfully deleted memory {memory_id} for user {user_id}")
+
     except firebase_exceptions.FirebaseError as e:
-        logger.error(f"Persistent Storage: Firebase error deleting memory '{memory_id}' for user '{user_id}': {e}")
+        logger.error(f"Persistent Storage: Firebase error deleting memory {memory_id} for user {user_id}: {e}")
+        raise
     except Exception as e:
-        logger.error(f"Persistent Storage: An unexpected error occurred during delete_raw_memory: {e}")
+        logger.error(f"Persistent Storage: Unexpected error deleting memory {memory_id} for user {user_id}: {e}")
+        raise
 
 def delete_all_user_raw_memories(user_id: str):
     """
-    Deletes all memory documents for a specific user from Firebase Firestore.
-    This is often used for cleanup in tests or if a user requests full data deletion.
+    Deletes all raw memories for a specific user from Firebase Firestore.
+
+    Args:
+        user_id (str): The unique identifier for the user.
     """
-    if _db is None:
-        logger.error("Persistent Storage: Firestore client not initialized. Cannot delete all user memories.")
+    if _use_mock_storage:
+        # Use in-memory storage
+        user_key = f"user_{user_id}"
+        if user_key in _mock_storage:
+            del _mock_storage[user_key]
+            logger.info(f"Mock Storage: Deleted all memories for user {user_id}")
         return
 
-    logger.info(f"Persistent Storage: Deleting ALL memories for user '{user_id}' from Firestore...")
+    if _db is None:
+        logger.error("Persistent Storage: Firestore client not initialized. Cannot delete memories.")
+        return
+
     try:
-        memories_ref = _db.collection(f'users/{user_id}/memories')
-        # Batch delete for efficiency and to handle more than 500 documents
-        # Firestore limits batch writes to 500 operations
-        docs = memories_ref.limit(500).stream()  # Get first 500
+        # Reference to the user's memories collection
+        collection_ref = _db.collection(f'users/{user_id}/memories')
+        
+        # Get all documents in the collection
+        docs = collection_ref.stream()
+        
+        # Delete each document
         deleted_count = 0
-        while True:
-            batch = _db.batch()
-            doc_count_in_batch = 0
-            for doc in docs:
-                batch.delete(doc.reference)
-                deleted_count += 1
-                doc_count_in_batch += 1
-            
-            if doc_count_in_batch == 0:
-                break  # No more documents to delete
+        for doc in docs:
+            doc.reference.delete()
+            deleted_count += 1
+        
+        logger.info(f"Persistent Storage: Successfully deleted {deleted_count} memories for user {user_id}")
 
-            batch.commit()
-            logger.info(f"  Deleted {doc_count_in_batch} documents. Total deleted: {deleted_count}.")
-            if doc_count_in_batch < 500:  # If less than 500, we've deleted all remaining
-                break
-            docs = memories_ref.limit(500).stream()  # Get next batch
-
-        logger.info(f"Persistent Storage: Finished deleting {deleted_count} memories for user '{user_id}'.")
     except firebase_exceptions.FirebaseError as e:
-        logger.error(f"Persistent Storage: Firebase error deleting all memories for user '{user_id}': {e}")
+        logger.error(f"Persistent Storage: Firebase error deleting memories for user {user_id}: {e}")
+        raise
     except Exception as e:
-        logger.error(f"Persistent Storage: An unexpected error occurred during delete_all_user_raw_memories: {e}")
+        logger.error(f"Persistent Storage: Unexpected error deleting memories for user {user_id}: {e}")
+        raise
+
+def get_user_memories_summary(user_id: str) -> Dict[str, Any]:
+    """
+    Gets a summary of all memories for a user.
+
+    Args:
+        user_id (str): The unique identifier for the user.
+
+    Returns:
+        dict: Summary information about the user's memories.
+    """
+    if _use_mock_storage:
+        # Use in-memory storage
+        user_key = f"user_{user_id}"
+        if user_key in _mock_storage:
+            memories = _mock_storage[user_key]
+            return {
+                'total_memories': len(memories),
+                'memory_types': list(set(m['memory_type'] for m in memories.values())),
+                'latest_memory': max(memories.values(), key=lambda x: x['timestamp']) if memories else None
+            }
+        return {'total_memories': 0, 'memory_types': [], 'latest_memory': None}
+
+    if _db is None:
+        logger.error("Persistent Storage: Firestore client not initialized. Cannot get memory summary.")
+        return {'total_memories': 0, 'memory_types': [], 'latest_memory': None}
+
+    try:
+        # Reference to the user's memories collection
+        collection_ref = _db.collection(f'users/{user_id}/memories')
+        
+        # Get all documents in the collection
+        docs = collection_ref.stream()
+        
+        memories = []
+        for doc in docs:
+            memories.append(doc.to_dict())
+        
+        return {
+            'total_memories': len(memories),
+            'memory_types': list(set(m['memory_type'] for m in memories)),
+            'latest_memory': max(memories, key=lambda x: x['timestamp']) if memories else None
+        }
+
+    except firebase_exceptions.FirebaseError as e:
+        logger.error(f"Persistent Storage: Firebase error getting memory summary for user {user_id}: {e}")
+        return {'total_memories': 0, 'memory_types': [], 'latest_memory': None}
+    except Exception as e:
+        logger.error(f"Persistent Storage: Unexpected error getting memory summary for user {user_id}: {e}")
+        return {'total_memories': 0, 'memory_types': [], 'latest_memory': None}
 
 
 # --- Self-Verification Block (for isolated testing) ---
