@@ -1,1 +1,13 @@
 # DVC pipeline configuration for Reflexionary
+
+stages:
+  prepare_data:
+    cmd: python prepare_data.py
+    outs:
+      - ../../data/processed_data.csv
+  train:
+    cmd: python ../model_training/train_anomaly_detector.py
+    deps:
+      - ../../data/processed_data.csv
+    outs:
+      - ../../models/anomaly_detector.pkl
