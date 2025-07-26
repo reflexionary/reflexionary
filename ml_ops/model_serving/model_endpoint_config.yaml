@@ -1,1 +1,10 @@
 # Model serving endpoint configuration for Reflexionary
+
+anomaly_detector:
+  path: /predict
+  method: POST
+  input_schema:
+    feature1: float
+    feature2: float
+  output_schema:
+    anomaly: bool
